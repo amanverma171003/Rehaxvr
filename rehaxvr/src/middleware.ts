@@ -22,6 +22,7 @@ export async function middleware(request: NextRequest) {
     url.searchParams.set("reason", "expired");
     return NextResponse.redirect(url);
   }
+  
 
   // Onboarding gate — the DB is authoritative, not the wizard's UI state.
   if (user && isApp && !onboardedAt) {
