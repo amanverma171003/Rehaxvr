@@ -1,27 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PasswordInput } from "@/components/auth/password-input";
 import { AlertTriangle, Loader2 } from "lucide-react";
-
-const schema = z.object({
-  email: z.string().email("Please enter a valid email address"),
-  password: z.string().min(1, "Please enter your password"),
-});
-
-type FormValues = z.infer<typeof schema>;
+import { signIn } from "@/lib/auth/actions";
+import { signInSchema, type SignInInput } from "@/lib/validation/auth-schemas";
 
 function LoginForm() {
-  const router = useRouter();
   const params = useSearchParams();
   const [serverError, setServerError] = useState<string | null>(null);
   const expired = params.get("reason") === "expired";
@@ -29,20 +22,16 @@ function LoginForm() {
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<SignInInput>({ resolver: zodResolver(signInSchema) });
 
-  const onSubmit = async (values: FormValues) => {
+  const onSubmit = async (values: SignInInput) => {
     setServerError(null);
-    await new Promise((r) => setTimeout(r, 800));
-    // Demo behavior: a specific address demonstrates the error state.
-    if (values.email === "wrong@demo.com") {
-      setServerError(
-        "That email and password combination doesn't match our records. Please try again or reset your password."
-      );
-      return;
-    }
-    router.push("/app");
+    const result = await signIn(values);
+    // signIn redirects on success; we only reach here on failure.
+    if (!result.ok) setServerError(result.error);
   };
 
   return (
@@ -119,7 +108,11 @@ function LoginForm() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Checkbox id="remember" defaultChecked />
+          <Checkbox
+            id="remember"
+            defaultChecked
+            onCheckedChange={(v) => setValue("remember", v === true)}
+          />
           <Label htmlFor="remember" className="text-sm font-normal text-body">
             Remember me on this device
           </Label>
@@ -136,10 +129,6 @@ function LoginForm() {
         <Link href="/signup" className="font-medium text-primary hover:underline">
           Create an organization account
         </Link>
-      </p>
-      <p className="mt-6 rounded-lg bg-surface-muted px-3 py-2 text-center text-xs text-muted-foreground">
-        Demo tip: any credentials sign you in. Use{" "}
-        <span className="font-mono">wrong@demo.com</span> to preview the error state.
       </p>
     </div>
   );

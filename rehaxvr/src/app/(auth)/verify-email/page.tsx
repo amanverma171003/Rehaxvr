@@ -1,49 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { MailCheck, CheckCircle2, Loader2 } from "lucide-react";
+import { MailCheck } from "lucide-react";
+import { resendVerification } from "@/lib/auth/actions";
 
-export default function VerifyEmailPage() {
-  const [email, setEmail] = useState<string>("your work email");
-  const [state, setState] = useState<"waiting" | "verifying" | "verified">("waiting");
+function VerifyEmailContent() {
+  const params = useSearchParams();
+  // Email is passed as a query param from the signup page — no sessionStorage.
+  const email = params.get("email") ?? "your work email";
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent" | "error">("idle");
 
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem("rehaxvr-onboarding");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.email) setEmail(parsed.email);
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  const simulateVerify = async () => {
-    setState("verifying");
-    await new Promise((r) => setTimeout(r, 1200));
-    setState("verified");
+  const handleResend = async () => {
+    setResendState("sending");
+    const result = await resendVerification(email);
+    setResendState(result.ok ? "sent" : "error");
   };
-
-  if (state === "verified") {
-    return (
-      <div className="text-center">
-        <div className="mx-auto grid size-14 place-items-center rounded-full bg-teal/12 text-teal">
-          <CheckCircle2 className="size-7" aria-hidden />
-        </div>
-        <h1 className="mt-5 text-2xl font-semibold tracking-tight text-ink">
-          Email verified
-        </h1>
-        <p className="mt-2 text-sm text-body">
-          Your account is confirmed. Next, let&apos;s set up your organization —
-          it takes about five minutes.
-        </p>
-        <Button size="lg" className="mt-6 w-full" asChild>
-          <Link href="/onboarding">Continue to organization setup</Link>
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <div className="text-center">
@@ -60,20 +34,23 @@ export default function VerifyEmailPage() {
       </p>
       <div className="mt-6 space-y-3">
         <Button
-          size="lg"
+          variant="ghost"
           className="w-full"
-          onClick={simulateVerify}
-          disabled={state === "verifying"}
+          onClick={handleResend}
+          disabled={resendState === "sending" || resendState === "sent"}
         >
-          {state === "verifying" && (
-            <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden />
-          )}
-          {state === "verifying" ? "Verifying…" : "I clicked the link (demo)"}
-        </Button>
-        <Button variant="ghost" className="w-full">
-          Resend verification email
+          {resendState === "sending"
+            ? "Sending…"
+            : resendState === "sent"
+              ? "Email sent — check your inbox"
+              : "Resend verification email"}
         </Button>
       </div>
+      {resendState === "error" && (
+        <p className="mt-3 text-xs text-danger">
+          Could not resend. Please wait a moment and try again.
+        </p>
+      )}
       <p className="mt-6 text-xs text-muted-foreground">
         Wrong address?{" "}
         <Link href="/signup" className="font-medium text-primary hover:underline">
@@ -81,5 +58,13 @@ export default function VerifyEmailPage() {
         </Link>
       </p>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

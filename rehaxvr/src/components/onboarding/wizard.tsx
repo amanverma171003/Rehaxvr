@@ -20,6 +20,18 @@ import { PRICING, formatPrice, priceFor, yearlySavings } from "@/lib/data/pricin
 import { gamesForPlan, GAMES } from "@/lib/data/games";
 import type { BillingCycle, Plan, Role } from "@/lib/types";
 import { cn } from "@/lib/utils";
+// Server actions — every "Next" button funnels through one of these so the
+// wizard state is authoritatively persisted before the user can move on.
+import {
+  saveOrganizationStep,
+  saveProfileStep,
+  savePlanStep,
+  confirmDemoPayment,
+  sendInvites,
+  completeOnboarding,
+  getOnboardingState,
+  type InviteResult,
+} from "@/lib/onboarding/actions";
 import {
   ArrowLeft,
   ArrowRight,
@@ -73,6 +85,16 @@ export function OnboardingWizard() {
   const [inviteRole, setInviteRole] = useState<Role>("THERAPIST");
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  // Server-action wiring: submitting shows a spinner + disables the button.
+  // stepError is rendered under the footer nav so users see backend failures inline.
+  // inviteResults surfaces per-invite success (email sent / failed) after step 5.
+  const [submitting, setSubmitting] = useState(false);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [inviteResults, setInviteResults] = useState<InviteResult[] | null>(null);
+
+  // On mount: seed from sessionStorage (for signup handoff) THEN reconcile with
+  // the server's canonical onboarding state so refreshes/re-opens jump to the
+  // right step instead of restarting from step 1.
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("rehaxvr-onboarding");
@@ -82,6 +104,35 @@ export function OnboardingWizard() {
         if (p.adminName) setAdminName(p.adminName);
       }
     } catch { /* ignore */ }
+
+    let cancelled = false;
+    (async () => {
+      const res = await getOnboardingState();
+      if (cancelled || !res.ok) return;
+      const s = res.data;
+      // Hydrate any fields the server already knows about.
+      if (s.organization) {
+        setOrgName(s.organization.name);
+        setOrgType(s.organization.org_type);
+      }
+      if (s.profile.fullName) setAdminName(s.profile.fullName);
+      if (s.subscription) {
+        setPlan(s.subscription.plan_code as Plan);
+        setCycle(s.subscription.interval);
+        if (s.subscription.status === "ACTIVE") setPaid(true);
+      }
+      // Jump to the first incomplete step. Order enforces strict dependency:
+      // organization is the hard gate for Step 1 because handle_new_user pre-fills
+      // profiles.full_name from signup metadata — so "fullName is truthy" alone
+      // is NOT proof that Step 2 was completed. Organization existence is.
+      if (s.onboardedAt) { setStep(6); return; }
+      if (!s.organization) { setStep(1); return; }
+      if (s.subscription?.status === "ACTIVE") { setStep(5); return; }
+      if (s.subscription) { setStep(4); return; }
+      if (s.profile.fullName) { setStep(3); return; }
+      setStep(2);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const price = priceFor(plan, cycle);
@@ -111,11 +162,78 @@ export function OnboardingWizard() {
     setInviteEmail("");
   };
 
+  // Demo checkout — no real payment is processed. The short delay keeps the
+  // UX feel of a real payment; the server call flips the subscription to ACTIVE.
   const simulatePayment = async () => {
+    setStepError(null);
     setPaying(true);
-    await new Promise((r) => setTimeout(r, 1400));
+    await new Promise((r) => setTimeout(r, 1000));
+    const res = await confirmDemoPayment();
     setPaying(false);
+    if (!res.ok) {
+      setStepError(res.error);
+      return;
+    }
     setPaid(true);
+  };
+
+  // Central "Next" handler — calls the right server action per step, and only
+  // advances the wizard on ok:true. Errors render inline; the DB is always
+  // authoritative because we persist before advancing.
+  const handleContinue = async () => {
+    setStepError(null);
+    setSubmitting(true);
+    try {
+      if (step === 1) {
+        const res = await saveOrganizationStep({
+          orgName,
+          orgType: orgType as "rehab" | "clinic" | "hospital" | "multi",
+          // stations is optional in the UI — pass the value if picked, else omit.
+          stations: (stations || undefined) as "1-2" | "3-5" | "6-15" | "16+" | undefined,
+        });
+        if (!res.ok) return setStepError(res.error);
+      } else if (step === 2) {
+        const res = await saveProfileStep({
+          adminName,
+          useCase: useCase as "ortho" | "neuro" | "geriatric" | "mixed",
+        });
+        if (!res.ok) return setStepError(res.error);
+      } else if (step === 3) {
+        const res = await savePlanStep({ plan, cycle });
+        if (!res.ok) return setStepError(res.error);
+      } else if (step === 5) {
+        // Sending invites is the "Finish setup" click — allow proceeding even
+        // on partial send failure; the row is PENDING and retryable.
+        if (invites.length > 0) {
+          const res = await sendInvites({ invites });
+          if (!res.ok) return setStepError(res.error);
+          setInviteResults(res.data.results);
+        }
+      }
+      setStep((s) => Math.min(6, s + 1));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // "Skip for now" on step 5 — no invites sent, still advances.
+  const handleSkipInvites = () => {
+    setInviteResults(null);
+    setStep(6);
+  };
+
+  // "Enter your dashboard" on step 6 — server verifies all prerequisites and
+  // only then flips profiles.onboarded_at. If it refuses, we surface the reason.
+  const handleEnterApp = async () => {
+    setStepError(null);
+    setSubmitting(true);
+    const res = await completeOnboarding();
+    setSubmitting(false);
+    if (!res.ok) {
+      setStepError(res.error);
+      return;
+    }
+    router.push("/app");
   };
 
   return (
@@ -512,11 +630,16 @@ export function OnboardingWizard() {
                 <Button
                   size="lg"
                   className="mt-8 px-6"
-                  onClick={() => router.push("/app")}
+                  onClick={handleEnterApp}
+                  disabled={submitting}
                 >
+                  {submitting && <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden />}
                   Enter your dashboard
                   <ArrowRight data-icon="inline-end" aria-hidden />
                 </Button>
+                {stepError && (
+                  <p className="mt-3 text-sm text-danger" role="alert">{stepError}</p>
+                )}
               </section>
             )}
           </motion.div>
@@ -525,29 +648,47 @@ export function OnboardingWizard() {
 
       {/* Footer nav */}
       {step < 6 && (
-        <div className="mt-6 flex items-center justify-between">
-          <Button
-            variant="ghost"
-            onClick={() => setStep((s) => Math.max(1, s - 1))}
-            disabled={step === 1}
-          >
-            <ArrowLeft data-icon="inline-start" aria-hidden />
-            Back
-          </Button>
-          <div className="flex items-center gap-3">
-            {step === 5 && (
-              <Button variant="ghost" onClick={() => setStep(6)}>
-                Skip for now
-              </Button>
-            )}
+        <div className="mt-6 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
             <Button
-              onClick={() => setStep((s) => Math.min(6, s + 1))}
-              disabled={!canContinue}
+              variant="ghost"
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
+              disabled={step === 1 || submitting}
             >
-              {step === 5 ? "Finish setup" : "Continue"}
-              <ArrowRight data-icon="inline-end" aria-hidden />
+              <ArrowLeft data-icon="inline-start" aria-hidden />
+              Back
             </Button>
+            <div className="flex items-center gap-3">
+              {step === 5 && (
+                <Button variant="ghost" onClick={handleSkipInvites} disabled={submitting}>
+                  Skip for now
+                </Button>
+              )}
+              <Button
+                onClick={handleContinue}
+                disabled={!canContinue || submitting}
+              >
+                {submitting && <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden />}
+                {step === 5 ? "Finish setup" : "Continue"}
+                <ArrowRight data-icon="inline-end" aria-hidden />
+              </Button>
+            </div>
           </div>
+          {stepError && (
+            <p className="text-right text-sm text-danger" role="alert">{stepError}</p>
+          )}
+          {/* Per-invite result surface — only shown after a send returned mixed results. */}
+          {step === 6 && inviteResults && inviteResults.some((r) => !r.emailSent) && (
+            <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900">
+              Some invitation emails could not be delivered right now — the
+              invitations are saved and can be resent from the Team page:
+              <ul className="mt-1 list-disc pl-4">
+                {inviteResults.filter((r) => !r.emailSent).map((r) => (
+                  <li key={r.email}>{r.email}{r.error ? ` — ${r.error}` : ""}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

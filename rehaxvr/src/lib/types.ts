@@ -121,3 +121,41 @@ export interface Subscription {
   seatsUsed: number;
   stations: number;
 }
+
+// -----------------------------------------------------------------------------
+// Onboarding domain types — shape returned by get_onboarding_state RPC and
+// consumed by the wizard/useAuth. Kept minimal on purpose; downstream code
+// should query specific tables rather than treating these as full DB rows.
+// -----------------------------------------------------------------------------
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  orgType: "rehab" | "clinic" | "hospital" | "multi";
+  location: string | null;
+  status: "ACTIVE" | "SUSPENDED" | "CANCELLED";
+}
+
+export interface Profile {
+  id: string;
+  fullName: string;
+  email: string;
+  onboardedAt: string | null;
+  onboardingOrganizationId: string | null;
+}
+
+export interface OnboardingState {
+  onboardedAt: string | null;
+  organization: {
+    id: string;
+    name: string;
+    org_type: string;
+    location: string | null;
+  } | null;
+  profile: { fullName: string | null };
+  subscription: {
+    plan_code: Plan;
+    interval: BillingCycle;
+    status: "INCOMPLETE" | "ACTIVE" | "TRIALING" | "PAST_DUE" | "UNPAID" | "CANCELLED";
+  } | null;
+}

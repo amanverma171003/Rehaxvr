@@ -1,0 +1,13 @@
+{
+  "name": "rehax-vr-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root wrapper — the Next.js app lives in ./rehaxvr. These scripts forward npm commands into it so they work from the repo root too.",
+  "scripts": {
+    "dev": "npm run dev --prefix rehaxvr",
+    "build": "npm run build --prefix rehaxvr",
+    "start": "npm run start --prefix rehaxvr",
+    "lint": "npm run lint --prefix rehaxvr",
+    "install:app": "npm install --prefix rehaxvr"
+  }
+}

@@ -1,30 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/auth/password-input";
-import { Check, CheckCircle2, Loader2, TimerOff, X } from "lucide-react";
-
-const schema = z
-  .object({
-    password: z
-      .string()
-      .min(8, "At least 8 characters")
-      .regex(/[A-Z]/, "Include an uppercase letter")
-      .regex(/[0-9]/, "Include a number"),
-    confirm: z.string(),
-  })
-  .refine((d) => d.password === d.confirm, {
-    path: ["confirm"],
-    message: "Passwords don't match",
-  });
-type FormValues = z.infer<typeof schema>;
+import { AlertTriangle, Check, CheckCircle2, Loader2, TimerOff, X } from "lucide-react";
+import { resetPassword } from "@/lib/auth/actions";
+import { resetPasswordSchema, type ResetPasswordInput } from "@/lib/validation/auth-schemas";
+import { useAuthContext } from "@/components/auth/auth-provider";
 
 function Requirement({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -36,33 +23,47 @@ function Requirement({ ok, label }: { ok: boolean; label: string }) {
 }
 
 function ResetForm() {
-  const params = useSearchParams();
-  const token = params.get("token");
+  const router = useRouter();
+  const { user, loading } = useAuthContext();
   const [done, setDone] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
     watch,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<ResetPasswordInput>({ resolver: zodResolver(resetPasswordSchema) });
+
   const pwd = watch("password") ?? "";
 
-  // Invalid / expired token states
-  if (!token || token === "expired" || token === "invalid") {
-    const expired = token === "expired";
+  const onSubmit = async (values: ResetPasswordInput) => {
+    setServerError(null);
+    const result = await resetPassword(values);
+    if (!result.ok) {
+      setServerError(result.error);
+      return;
+    }
+    setDone(true);
+    // Redirect to login after a brief moment so the success state is readable.
+    setTimeout(() => router.push("/login?reset=success"), 2500);
+  };
+
+  // Still resolving whether the user came through the recovery callback.
+  if (loading) return null;
+
+  // No session means the callback link was never clicked, or the session expired.
+  if (!user) {
     return (
       <div className="text-center">
         <div className="mx-auto grid size-14 place-items-center rounded-full bg-warning/10 text-warning">
           <TimerOff className="size-7" aria-hidden />
         </div>
         <h1 className="mt-5 text-2xl font-semibold tracking-tight text-ink">
-          {expired ? "This reset link has expired" : "This reset link isn't valid"}
+          This reset link isn&apos;t valid
         </h1>
         <p className="mt-2 text-sm text-body">
-          {expired
-            ? "Reset links expire after 30 minutes for security. Request a new one and you'll be back in shortly."
-            : "The link may have been used already or copied incompletely. Request a fresh link to continue."}
+          The link may have expired or been used already. Request a fresh link to continue.
         </p>
         <div className="mt-6 space-y-3">
           <Button className="w-full" asChild>
@@ -96,11 +97,6 @@ function ResetForm() {
     );
   }
 
-  const onSubmit = async () => {
-    await new Promise((r) => setTimeout(r, 800));
-    setDone(true);
-  };
-
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight text-ink">
@@ -109,6 +105,17 @@ function ResetForm() {
       <p className="mt-1.5 text-sm text-muted-foreground">
         Almost there. Pick a strong password you haven&apos;t used before.
       </p>
+
+      {serverError && (
+        <div
+          className="mt-5 flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/6 px-3 py-2.5 text-sm text-danger"
+          role="alert"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+          {serverError}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
         <div>
           <Label htmlFor="rp-password">New password</Label>
@@ -124,6 +131,7 @@ function ResetForm() {
             <Requirement ok={pwd.length >= 8} label="8+ characters" />
             <Requirement ok={/[A-Z]/.test(pwd)} label="Uppercase letter" />
             <Requirement ok={/[0-9]/.test(pwd)} label="Number" />
+            <Requirement ok={/[^A-Za-z0-9]/.test(pwd)} label="Symbol" />
           </div>
         </div>
         <div>

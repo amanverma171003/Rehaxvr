@@ -4,27 +4,25 @@ import Link from "next/link";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Loader2, MailCheck } from "lucide-react";
-
-const schema = z.object({
-  email: z.string().email("Please enter a valid email address"),
-});
-type FormValues = z.infer<typeof schema>;
+import { forgotPassword } from "@/lib/auth/actions";
+import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/validation/auth-schemas";
 
 export default function ForgotPasswordPage() {
   const [sentTo, setSentTo] = useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<ForgotPasswordInput>({ resolver: zodResolver(forgotPasswordSchema) });
 
-  const onSubmit = async (values: FormValues) => {
-    await new Promise((r) => setTimeout(r, 800));
+  const onSubmit = async (values: ForgotPasswordInput) => {
+    // Always returns ok:true — prevents revealing which emails are registered.
+    await forgotPassword(values);
     setSentTo(values.email);
   };
 
@@ -43,13 +41,6 @@ export default function ForgotPasswordPage() {
           sent a password reset link. It expires in 30 minutes.
         </p>
         <div className="mt-6 space-y-3">
-          <Button className="w-full" asChild>
-            {/* Demo: link simulates opening the email */}
-            <Link href="/reset-password?token=demo-valid">Open reset link (demo)</Link>
-          </Button>
-          <Button variant="outline" className="w-full" asChild>
-            <Link href="/reset-password?token=expired">Preview expired-link state (demo)</Link>
-          </Button>
           <Button variant="ghost" className="w-full" asChild>
             <Link href="/login">
               <ArrowLeft data-icon="inline-start" aria-hidden />
