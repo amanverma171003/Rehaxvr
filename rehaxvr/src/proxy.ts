@@ -1,4 +1,7 @@
-// Route middleware — refreshes the Supabase session and enforces route guards.
+// Route proxy — refreshes the Supabase session and enforces route guards.
+// Formerly src/middleware.ts; renamed for Next.js 16's middleware->proxy migration.
+// The helper module at src/lib/supabase/middleware.ts keeps its name (it's a plain
+// module, not the Next.js file convention).
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
@@ -7,7 +10,7 @@ const PROTECTED_PREFIXES = ["/app", "/onboarding"];
 // Auth pages that authenticated users should be redirected away from.
 const AUTH_ONLY_PATHS = ["/login", "/signup"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { supabaseResponse, user, onboardedAt } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
